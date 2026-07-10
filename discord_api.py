@@ -1,217 +1,115 @@
-"""Acceso a la base de datos PostgreSQL para la web de Postulaciones.
+"""Llamadas REST a la API de Discord usadas por la web (sin gateway).
 
-Usa una conexión nueva por operación (vía un pool sencillo) para evitar
-problemas de hilos con el servidor de desarrollo de Flask.
+Usa el token del bot (secreto TOKEN, ya configurado para el bot) para:
+- Consultar información de OAuth2 del usuario que inicia sesión.
+- Consultar los roles del usuario en el servidor de Postulaciones.
+- Enviar mensajes directos (MD) a los usuarios sobre el estado de su postulación.
 """
 
 import os
-import json
-from contextlib import contextmanager
+import requests
 
-import psycopg2
-import psycopg2.extras
+API_BASE = "https://discord.com/api/v10"
+BOT_TOKEN = os.environ.get("TOKEN")
+CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID")
+CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET")
+GUILD_ID = os.environ.get("DISCORD_GUILD_ID")
+ADMIN_ROLE_ID = os.environ.get("DISCORD_ADMIN_ROLE_ID")
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def _bot_headers() -> dict:
+    return {"Authorization": f"Bot {BOT_TOKEN}"}
 
 
-@contextmanager
-def get_conn():
-    conn = psycopg2.connect(DATABASE_URL)
+def exchange_code(code: str, redirect_uri: str) -> dict:
+    """Intercambia el código de OAuth2 por un access token del usuario."""
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    resp = requests.post(f"{API_BASE}/oauth2/token", data=data, headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_user_identity(access_token: str) -> dict:
+    """Obtiene id/username/avatar del usuario autenticado (scope identify)."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    resp = requests.get(f"{API_BASE}/users/@me", headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def user_has_admin_role(discord_id: int) -> bool:
+    """Consulta (con el token del bot) si el usuario tiene el rol de admin en el servidor."""
+    if not GUILD_ID or not ADMIN_ROLE_ID:
+        return False
     try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
-def _dictify(cur):
-    cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, row)) for row in cur.fetchall()]
-
-
-def query(sql: str, params: tuple = ()) -> list[dict]:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            if cur.description:
-                return _dictify(cur)
-            return []
-
-
-def query_one(sql: str, params: tuple = ()) -> dict | None:
-    rows = query(sql, params)
-    return rows[0] if rows else None
-
-
-def execute(sql: str, params: tuple = ()) -> None:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-
-
-# ---------------------------------------------------------------------------
-# Usuarios
-# ---------------------------------------------------------------------------
-
-def upsert_login_user(discord_id: int, username: str, avatar: str | None,
-                       is_admin_from_role: bool, is_initial_admin: bool) -> dict:
-    """Crea o actualiza un usuario al iniciar sesión.
-
-    Nunca degrada permisos ya otorgados manualmente; sólo los eleva si el
-    usuario tiene el rol de admin en Discord o es el admin inicial.
-    """
-    existing = query_one("SELECT * FROM users WHERE discord_id = %s", (discord_id,))
-    grant_admin = is_admin_from_role or is_initial_admin
-    if existing is None:
-        execute(
-            """
-            INSERT INTO users (discord_id, username, avatar, is_admin, is_gestion)
-            VALUES (%s, %s, %s, %s, FALSE)
-            """,
-            (discord_id, username, avatar, grant_admin),
+        resp = requests.get(
+            f"{API_BASE}/guilds/{GUILD_ID}/members/{discord_id}",
+            headers=_bot_headers(),
+            timeout=10,
         )
-    else:
-        new_admin = existing["is_admin"] or grant_admin
-        execute(
-            """
-            UPDATE users SET username = %s, avatar = %s, is_admin = %s, updated_at = NOW()
-            WHERE discord_id = %s
-            """,
-            (username, avatar, new_admin, discord_id),
+        if resp.status_code != 200:
+            return False
+        roles = resp.json().get("roles", [])
+        return ADMIN_ROLE_ID in roles
+    except requests.RequestException:
+        return False
+
+
+def fetch_public_user(discord_id: int) -> dict | None:
+    """Obtiene datos públicos de un usuario por ID (para mostrarlo en paneles)."""
+    try:
+        resp = requests.get(f"{API_BASE}/users/{discord_id}", headers=_bot_headers(), timeout=10)
+        if resp.status_code != 200:
+            return None
+        return resp.json()
+    except requests.RequestException:
+        return None
+
+
+def _open_dm_channel(discord_id: int) -> str | None:
+    resp = requests.post(
+        f"{API_BASE}/users/@me/channels",
+        headers=_bot_headers(),
+        json={"recipient_id": str(discord_id)},
+        timeout=10,
+    )
+    if resp.status_code not in (200, 201):
+        return None
+    return resp.json().get("id")
+
+
+def send_dm(discord_id: int, content: str | None = None, embed: dict | None = None) -> bool:
+    """Envía un mensaje directo al usuario. Devuelve False si falla o tiene los MD cerrados."""
+    try:
+        channel_id = _open_dm_channel(discord_id)
+        if not channel_id:
+            return False
+        payload = {}
+        if content:
+            payload["content"] = content
+        if embed:
+            payload["embeds"] = [embed]
+        resp = requests.post(
+            f"{API_BASE}/channels/{channel_id}/messages",
+            headers=_bot_headers(),
+            json=payload,
+            timeout=10,
         )
-    return query_one("SELECT * FROM users WHERE discord_id = %s", (discord_id,))
+        return resp.status_code in (200, 201)
+    except requests.RequestException:
+        return False
 
 
-def get_user(discord_id: int) -> dict | None:
-    return query_one("SELECT * FROM users WHERE discord_id = %s", (discord_id,))
-
-
-def list_users() -> list[dict]:
-    return query("SELECT * FROM users ORDER BY created_at DESC")
-
-
-def set_user_role(discord_id: int, field: str, value: bool) -> None:
-    if field not in ("is_admin", "is_gestion"):
-        raise ValueError("Campo de rol inválido")
-    execute(f"UPDATE users SET {field} = %s, updated_at = NOW() WHERE discord_id = %s", (value, discord_id))
-
-
-def add_manual_user(discord_id: int, username: str, is_admin: bool, is_gestion: bool) -> None:
-    execute(
-        """
-        INSERT INTO users (discord_id, username, avatar, is_admin, is_gestion)
-        VALUES (%s, %s, NULL, %s, %s)
-        ON CONFLICT (discord_id) DO UPDATE
-            SET is_admin = EXCLUDED.is_admin OR users.is_admin,
-                is_gestion = EXCLUDED.is_gestion OR users.is_gestion,
-                username = EXCLUDED.username,
-                updated_at = NOW()
-        """,
-        (discord_id, username, is_admin, is_gestion),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Formularios (postulaciones)
-# ---------------------------------------------------------------------------
-
-def list_forms(status: str | None = None) -> list[dict]:
-    if status:
-        return query("SELECT * FROM forms WHERE status = %s ORDER BY created_at DESC", (status,))
-    return query("SELECT * FROM forms ORDER BY created_at DESC")
-
-
-def get_form(form_id: int) -> dict | None:
-    return query_one("SELECT * FROM forms WHERE id = %s", (form_id,))
-
-
-def create_form(title: str, description: str, questions: list[str], created_by: int) -> int:
-    row = query_one(
-        """
-        INSERT INTO forms (title, description, questions, status, created_by)
-        VALUES (%s, %s, %s, 'open', %s)
-        RETURNING id
-        """,
-        (title, description, json.dumps(questions), created_by),
-    )
-    return row["id"]
-
-
-def set_form_status(form_id: int, status: str) -> None:
-    execute("UPDATE forms SET status = %s, updated_at = NOW() WHERE id = %s", (status, form_id))
-
-
-def delete_form(form_id: int) -> None:
-    execute("DELETE FROM forms WHERE id = %s", (form_id,))
-
-
-# ---------------------------------------------------------------------------
-# Postulaciones (applications)
-# ---------------------------------------------------------------------------
-
-def get_application_for_user(form_id: int, user_id: int) -> dict | None:
-    return query_one("SELECT * FROM applications WHERE form_id = %s AND user_id = %s", (form_id, user_id))
-
-
-def create_application(form_id: int, user_id: int, username: str, answers: list[dict]) -> int:
-    row = query_one(
-        """
-        INSERT INTO applications (form_id, user_id, username, answers, status)
-        VALUES (%s, %s, %s, %s, 'pending')
-        RETURNING id
-        """,
-        (form_id, user_id, username, json.dumps(answers)),
-    )
-    return row["id"]
-
-
-def list_applications(status: str | None = None) -> list[dict]:
-    if status:
-        return query(
-            """
-            SELECT a.*, f.title AS form_title FROM applications a
-            JOIN forms f ON f.id = a.form_id
-            WHERE a.status = %s
-            ORDER BY a.created_at ASC
-            """,
-            (status,),
-        )
-    return query(
-        """
-        SELECT a.*, f.title AS form_title FROM applications a
-        JOIN forms f ON f.id = a.form_id
-        ORDER BY a.created_at ASC
-        """
-    )
-
-
-def get_application(app_id: int) -> dict | None:
-    return query_one(
-        """
-        SELECT a.*, f.title AS form_title FROM applications a
-        JOIN forms f ON f.id = a.form_id
-        WHERE a.id = %s
-        """,
-        (app_id,),
-    )
-
-
-def update_application_status(app_id: int, status: str, reviewer_id: int | None = None,
-                               reviewer_name: str | None = None, review_note: str | None = None,
-                               final_score: str | None = None) -> None:
-    execute(
-        """
-        UPDATE applications
-        SET status = %s,
-            reviewer_id = COALESCE(%s, reviewer_id),
-            reviewer_name = COALESCE(%s, reviewer_name),
-            review_note = COALESCE(%s, review_note),
-            final_score = COALESCE(%s, final_score),
-            updated_at = NOW()
-        WHERE id = %s
-        """,
-        (status, reviewer_id, reviewer_name, review_note, final_score, app_id),
-    )
+def avatar_url(discord_id: int, avatar_hash: str | None) -> str:
+    if avatar_hash:
+        ext = "gif" if avatar_hash.startswith("a_") else "png"
+        return f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar_hash}.{ext}?size=128"
+    default_index = (int(discord_id) >> 22) % 6
+    return f"https://cdn.discordapp.com/embed/avatars/{default_index}.png"
