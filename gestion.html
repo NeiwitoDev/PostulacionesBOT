@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Gestión · Postulaciones{% endblock %}
+{% block content %}
+<h1 class="page-title">Panel de Gestión</h1>
+<p class="page-subtitle">Revisa las postulaciones recibidas y comunica una decisión.</p>
+
+{% if not applications %}
+  <div class="empty-state">Todavía no hay postulaciones recibidas.</div>
+{% else %}
+<div class="app-list">
+  {% for app in applications %}
+  <div class="app-card">
+    <div class="app-header">
+      <div>
+        <h2>{{ app.form_title }}</h2>
+        <p class="app-meta">Postulante: <strong>{{ app.username }}</strong> · ID {{ app.user_id }}</p>
+      </div>
+      <span class="badge status-{{ app.status }}">
+        {% if app.status == 'pending' %}Pendiente
+        {% elif app.status == 'in_review' %}En revisión
+        {% elif app.status == 'approved' %}Aprobada
+        {% else %}Rechazada{% endif %}
+      </span>
+    </div>
+
+    {% if app.status in ('pending', 'in_review') %}
+    <div class="app-actions">
+      {% if app.status == 'pending' %}
+      <form method="post" action="{{ url_for('gestion_notify', app_id=app.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <button class="btn btn-secondary" type="submit">Avisar revisión</button>
+      </form>
+      {% endif %}
+      <button class="btn btn-success" type="button" onclick="document.getElementById('approve-{{ app.id }}').showModal()">Aprobar</button>
+      <button class="btn btn-danger" type="button" onclick="document.getElementById('reject-{{ app.id }}').showModal()">Rechazar</button>
+    </div>
+    {% else %}
+    <div class="app-actions">
+      <p class="reviewed-note">
+        {{ 'Aprobada' if app.status == 'approved' else 'Rechazada' }} por {{ app.reviewer_name }}
+        {% if app.final_score %} · Nota: {{ app.final_score }}{% endif %}
+        {% if app.review_note %} · {{ app.review_note }}{% endif %}
+      </p>
+    </div>
+    {% endif %}
+
+    <details class="answers">
+      <summary>Ver respuestas del formulario</summary>
+      {% for a in app.answers %}
+      <div class="answer-block">
+        <p class="answer-q">{{ a.question }}</p>
+        <p class="answer-a">{{ a.answer }}</p>
+      </div>
+      {% endfor %}
+    </details>
+  </div>
+
+  <dialog id="approve-{{ app.id }}" class="modal">
+    <form method="post" action="{{ url_for('gestion_approve', app_id=app.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <h3>Aprobar postulación</h3>
+      <div class="field">
+        <label>Nota final (opcional)</label>
+        <input type="text" name="score" placeholder="Ej: 9/10">
+      </div>
+      <div class="field">
+        <label>Comentario (opcional)</label>
+        <textarea name="note" rows="3"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancelar</button>
+        <button class="btn btn-success" type="submit">Confirmar aprobación</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reject-{{ app.id }}" class="modal">
+    <form method="post" action="{{ url_for('gestion_reject', app_id=app.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <h3>Rechazar postulación</h3>
+      <div class="field">
+        <label>Motivo del rechazo</label>
+        <textarea name="reason" rows="3" required></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancelar</button>
+        <button class="btn btn-danger" type="submit">Confirmar rechazo</button>
+      </div>
+    </form>
+  </dialog>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Administración · Postulaciones{% endblock %}
+{% block content %}
+<h1 class="page-title">Panel de Administración</h1>
+
+<section class="panel">
+  <h2>Permisos de usuarios</h2>
+  <form class="inline-form" method="post" action="{{ url_for('admin_add_user') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <input type="text" name="discord_id" placeholder="ID de Discord del usuario" required>
+    <label class="checkbox"><input type="checkbox" name="grant_admin"> Admin</label>
+    <label class="checkbox"><input type="checkbox" name="grant_gestion"> Gestión</label>
+    <button class="btn btn-primary" type="submit">Agregar / actualizar</button>
+  </form>
+
+  <table class="table">
+    <thead>
+      <tr><th>Usuario</th><th>ID</th><th>Admin</th><th>Gestión</th></tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.username }}</td>
+        <td class="mono">{{ u.discord_id }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_toggle_user', discord_id=u.discord_id, field='is_admin') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <button class="pill {{ 'pill-on' if u.is_admin else 'pill-off' }}" type="submit">{{ 'Sí' if u.is_admin else 'No' }}</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('admin_toggle_user', discord_id=u.discord_id, field='is_gestion') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <button class="pill {{ 'pill-on' if u.is_gestion else 'pill-off' }}" type="submit">{{ 'Sí' if u.is_gestion else 'No' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Crear postulación</h2>
+  <form method="post" action="{{ url_for('admin_create_form') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <label>Título</label>
+      <input type="text" name="title" required>
+    </div>
+    <div class="field">
+      <label>Descripción (opcional)</label>
+      <textarea name="description" rows="2"></textarea>
+    </div>
+    <div class="field">
+      <label>Preguntas (una por línea)</label>
+      <textarea name="questions" rows="5" placeholder="¿Por qué quieres unirte al equipo?&#10;¿Qué experiencia tienes?" required></textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">Crear postulación</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Postulaciones existentes</h2>
+  {% if not forms %}
+    <p class="empty-state">Todavía no has creado ninguna postulación.</p>
+  {% else %}
+  <table class="table">
+    <thead><tr><th>Título</th><th>Estado</th><th>Preguntas</th><th></th></tr></thead>
+    <tbody>
+      {% for f in forms %}
+      <tr>
+        <td>{{ f.title }}</td>
+        <td><span class="badge {{ 'badge-open' if f.status == 'open' else 'badge-closed' }}">{{ 'Abierta' if f.status == 'open' else 'Cerrada' }}</span></td>
+        <td>{{ f.questions|length }}</td>
+        <td class="row-actions">
+          <form method="post" action="{{ url_for('admin_toggle_form', form_id=f.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <button class="btn btn-small" type="submit">{{ 'Cerrar' if f.status == 'open' else 'Abrir' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('admin_delete_form', form_id=f.id) }}" onsubmit="return confirm('¿Eliminar esta postulación y todas sus respuestas?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <button class="btn btn-small btn-danger" type="submit">Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}

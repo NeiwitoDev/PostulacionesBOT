@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Iniciar sesión · Postulaciones{% endblock %}
+{% block content %}
+<div class="login-screen">
+  <div class="login-card">
+    <div class="login-icon">🎓</div>
+    <h1>Portal de Postulaciones</h1>
+    <p>Inicia sesión con tu cuenta de Discord para ver las postulaciones disponibles y hacer seguimiento de tu proceso.</p>
+    <a class="discord-btn" href="{{ url_for('login') }}">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.369A19.79 19.79 0 0 0 15.885 3c-.2.36-.42.84-.577 1.22a18.27 18.27 0 0 0-5.6 0A11.6 11.6 0 0 0 9.13 3a19.74 19.74 0 0 0-4.435 1.372C1.99 8.15 1.24 11.84 1.51 15.47a19.9 19.9 0 0 0 5.994 3.03c.483-.66.913-1.36 1.284-2.1a12.9 12.9 0 0 1-2.02-.97c.17-.12.336-.25.497-.38a14.2 14.2 0 0 0 12.02 0c.163.13.328.26.497.38a12.9 12.9 0 0 1-2.026.97c.372.74.8 1.44 1.285 2.1a19.87 19.87 0 0 0 6-3.03c.32-4.2-.63-7.86-2.724-11.1ZM8.68 13.33c-.9 0-1.64-.83-1.64-1.85 0-1.02.72-1.85 1.64-1.85.93 0 1.66.84 1.64 1.85 0 1.02-.71 1.85-1.64 1.85Zm6.64 0c-.9 0-1.64-.83-1.64-1.85 0-1.02.72-1.85 1.64-1.85.93 0 1.66.84 1.64 1.85 0 1.02-.71 1.85-1.64 1.85Z"/></svg>
+      Iniciar sesión con Discord
+    </a>
+  </div>
+</div>
+{% endblock %}

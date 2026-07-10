@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Home · Postulaciones{% endblock %}
+{% block content %}
+<h1 class="page-title">Postulaciones abiertas</h1>
+<p class="page-subtitle">Elige una postulación disponible y completa el formulario.</p>
+
+{% if not forms %}
+  <div class="empty-state">No hay postulaciones abiertas en este momento. Vuelve pronto.</div>
+{% else %}
+  <div class="card-grid">
+    {% for form in forms %}
+    <div class="card">
+      <h2>{{ form.title }}</h2>
+      {% if form.description %}<p class="card-desc">{{ form.description }}</p>{% endif %}
+      <p class="card-meta">{{ form.questions|length }} pregunta{{ 's' if form.questions|length != 1 }}</p>
+      {% if form.id in applied_ids %}
+        <span class="badge badge-muted">Ya te postulaste</span>
+      {% else %}
+        <a class="btn btn-primary" href="{{ url_for('apply', form_id=form.id) }}">Postularme</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}
